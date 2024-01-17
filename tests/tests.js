@@ -28,7 +28,7 @@ var ACTUAL_PLAYBACK_TEST_TIMEOUT = 2 * 60 * 1000;
 var WEB_MP3_FILE = 'https://cordova.apache.org/static/downloads/BlueZedEx.mp3';
 var WEB_MP3_STREAM = 'https://cordova.apache.org/static/downloads/BlueZedEx.mp3';
 
-var isWindows = cordova.platformId === 'windows8' || cordova.platformId === 'windows';
+var isWindows = cordova.platformId === 'windows';
 var isBrowser = cordova.platformId === 'browser';
 // Detect whether audio hardware is available and enabled. For iOS playing audio is
 // not supported on emulators w/out sound device connected to host PC but (which is
@@ -39,7 +39,14 @@ var isAudioSupported = isWindows
         ? !window.SAUCELABS_ENV
         : true;
 
-var isKitKat = cordova.platformId === 'android' && /Android\s4\.4/.test(window.navigator.userAgent);
+// Detect OS version when running on Android
+var androidVersion = null;
+if (cordova.platformId === 'android') {
+    var ua = navigator.userAgent;
+    var androidStart = ua.indexOf('Android ');
+    var versionString = ua.substring(androidStart + 8, ua.indexOf(';', androidStart));
+    androidVersion = versionString.split('.').map(function (x) { return x / 1; });
+}
 
 exports.defineAutoTests = function () {
     var failed = function (done, msg, context) {
@@ -200,11 +207,6 @@ exports.defineAutoTests = function () {
         });
 
         it('media.spec.18 should return MediaError for bad filename', function (done) {
-            // bb10 dialog pops up, preventing tests from running
-            if (cordova.platformId === 'blackberry10') {
-                pending();
-            }
-
             var context = this;
             var fileName = 'invalid.file.name';
             var badMedia = new Media(
@@ -245,7 +247,7 @@ exports.defineAutoTests = function () {
                 'media.spec.19 position should be set properly',
                 function (done) {
                     // no audio hardware available
-                    if (!isAudioSupported || isBrowser || isKitKat) {
+                    if (!isAudioSupported || isBrowser) {
                         pending();
                     }
 
@@ -283,7 +285,7 @@ exports.defineAutoTests = function () {
             it(
                 'media.spec.20 duration should be set properly',
                 function (done) {
-                    if (!isAudioSupported || cordova.platformId === 'blackberry10' || isBrowser || isKitKat) {
+                    if (!isAudioSupported || isBrowser) {
                         pending();
                     }
 
@@ -321,7 +323,7 @@ exports.defineAutoTests = function () {
             it(
                 'media.spec.21 should be able to resume playback after pause',
                 function (done) {
-                    if (!isAudioSupported || cordova.platformId === 'blackberry10' || isKitKat || isBrowser) {
+                    if (!isAudioSupported || isBrowser) {
                         /**
                          * Browser Error:
                          * Uncaught (in promise) DOMException: play() failed because the user didn't interact with
@@ -387,7 +389,7 @@ exports.defineAutoTests = function () {
             it(
                 'media.spec.22 should be able to seek through file',
                 function (done) {
-                    if (!isAudioSupported || cordova.platformId === 'blackberry10' || isKitKat || isBrowser) {
+                    if (!isAudioSupported || isBrowser) {
                         /**
                          * Browser Error:
                          * Uncaught (in promise) DOMException: play() failed because the user didn't interact with
@@ -447,68 +449,67 @@ exports.defineAutoTests = function () {
             media1.release();
         });
 
-        it(
-            'media.spec.24 playback rate should be set properly using setRate',
-            function (done) {
-                if (cordova.platformId !== 'ios') {
-                    expect(true).toFailWithMessage('Platform does not supported this feature');
-                    pending();
+        it('media.spec.24 playback rate should be set properly using setRate', function (done) {
+            if (
+                cordova.platformId !== 'ios' &&
+                (cordova.platformId !== 'android' || androidVersion[0] <= 6)
+            ) {
+                expect(true).toFailWithMessage('Platform does not supported this feature');
+                pending();
+            }
+
+            // no audio hardware available
+            if (!isAudioSupported) {
+                pending();
+            }
+
+            var mediaFile = WEB_MP3_FILE;
+            var successCallback;
+            var context = this;
+            var flag = true;
+            var statusChange = function (statusCode) {
+                console.log('status code: ' + statusCode);
+                if (statusCode === Media.MEDIA_RUNNING && flag) {
+                    // flag variable used to ensure an extra security statement to ensure that the callback is processed only once,
+                    // in case for some reason the statusChange callback is reached more than one time with the same status code.
+                    // Some information about this kind of behavior it can be found at JIRA: CB-7099
+                    flag = false;
+                    setTimeout(function () {
+                        media1.getCurrentPosition(
+                            function (position) {
+                                // in four seconds expect position to be between 4 & 10. Here, the values are chosen to give
+                                // a large enough buffer range for the position to fall in and are not based on any calculation.
+                                expect(position).not.toBeLessThan(4);
+                                expect(position).toBeLessThan(10);
+                                media1.stop();
+                                media1.release();
+                                context.done = true;
+                                done();
+                            },
+                            failed.bind(null, done, 'media1.getCurrentPosition - Error getting media current position'),
+                            context
+                        );
+                    }, 4000);
                 }
+            };
 
-                // no audio hardware available
-                if (!isAudioSupported) {
-                    pending();
-                }
-
-                var mediaFile = WEB_MP3_FILE;
-                var successCallback;
-                var context = this;
-                var flag = true;
-                var statusChange = function (statusCode) {
-                    console.log('status code: ' + statusCode);
-                    if (statusCode === Media.MEDIA_RUNNING && flag) {
-                        // flag variable used to ensure an extra security statement to ensure that the callback is processed only once,
-                        // in case for some reason the statusChange callback is reached more than one time with the same status code.
-                        // Some information about this kind of behavior it can be found at JIRA: CB-7099
-                        flag = false;
-                        setTimeout(function () {
-                            media1.getCurrentPosition(
-                                function (position) {
-                                    // in four seconds expect position to be between 4 & 10. Here, the values are chosen to give
-                                    // a large enough buffer range for the position to fall in and are not based on any calculation.
-                                    expect(position).not.toBeLessThan(4);
-                                    expect(position).toBeLessThan(10);
-                                    media1.stop();
-                                    media1.release();
-                                    context.done = true;
-                                    done();
-                                },
-                                failed.bind(null, done, 'media1.getCurrentPosition - Error getting media current position'),
-                                context
-                            );
-                        }, 4000);
-                    }
-                };
-
-                var media1 = new Media(
-                    mediaFile,
-                    successCallback,
-                    failed.bind(null, done, 'media1 = new Media - Error creating Media object. Media file: ' + mediaFile, context),
-                    statusChange
-                );
-                // make audio playback two times faster
-                media1.setRate(2);
-                media1.play();
-            },
-            ACTUAL_PLAYBACK_TEST_TIMEOUT
-        );
+            var media1 = new Media(
+                mediaFile,
+                successCallback,
+                failed.bind(null, done, 'media1 = new Media - Error creating Media object. Media file: ' + mediaFile, context),
+                statusChange
+            );
+            // make audio playback two times faster
+            media1.setRate(2);
+            media1.play();
+        }, ACTUAL_PLAYBACK_TEST_TIMEOUT);
 
         it(
             'media.spec.25 should be able to play an audio stream',
             function (done) {
                 // no audio hardware available, OR
                 // O_o Safari can't play the stream, so we're skipping this test on all browsers o_O
-                if (!isAudioSupported || isBrowser || isKitKat) {
+                if (!isAudioSupported || isBrowser) {
                     pending();
                 }
 
@@ -544,11 +545,6 @@ exports.defineAutoTests = function () {
         );
 
         it('media.spec.26 should not crash or throw when setting the volume right after creating the media', function (done) {
-            // bb10 dialog pops up, preventing tests from running
-            if (cordova.platformId === 'blackberry10') {
-                pending();
-            }
-
             var mediaFile = WEB_MP3_FILE;
             var media = null;
 
@@ -567,8 +563,7 @@ exports.defineAutoTests = function () {
         });
 
         it('media.spec.27 should call success or error when trying to stop a media that is in starting state', function (done) {
-            // bb10 dialog pops up, preventing tests from running
-            if (!isAudioSupported || cordova.platformId === 'blackberry10' || isBrowser) {
+            if (!isAudioSupported || isBrowser) {
                 /**
                  * Browser Error:
                  * Uncaught (in promise) DOMException: play() failed because the user didn't interact with
@@ -920,27 +915,6 @@ exports.defineManualTests = function (contentEl, createActionButton) {
         );
     }
 
-    // Function to create a file for BB recording
-    function getRecordSrcBB () {
-        var fsFail = function (error) {
-            console.log('error creating file for BB recording', error);
-        };
-        var gotFile = function (file) {
-            recordSrc = file.fullPath;
-        };
-        var gotFS = function (fileSystem) {
-            fileSystem.root.getFile(
-                'BBRecording.amr',
-                {
-                    create: true
-                },
-                gotFile,
-                fsFail
-            );
-        };
-        window.requestFileSystem(LocalFileSystem.TEMPORARY, 0, gotFS, fsFail);
-    }
-
     // Function to create a file for Windows recording
     function getRecordSrcWin () {
         var fsFail = function (error) {
@@ -1262,12 +1236,10 @@ exports.defineManualTests = function (contentEl, createActionButton) {
         },
         'setVolumeBtn'
     );
-    // get Special path to record if iOS || Blackberry
+    // get Special path to record if iOS
     if (cordova.platformId === 'ios') {
         getRecordSrc();
-    } else if (cordova.platformId === 'blackberry') {
-        getRecordSrcBB();
-    } else if (cordova.platformId === 'windows' || cordova.platformId === 'windows8') {
+    } else if (cordova.platformId === 'windows') {
         getRecordSrcWin();
     }
 
